@@ -45,7 +45,35 @@
     {:status 303
      :headers {"location" "/app"}}))
 
+(defn delete-balance [{:keys [biff/db path-params] :as req}]
+  (biff/pprint (parse-uuid (:id path-params)))
+  (def result (biff/submit-tx db {:db/op :delete
+                                   :xt/id (:xt/id (parse-uuid (:id path-params)))}))
+
+  ;; (def result (biff/q db '{:find [(pull b [:xt/id :balance/name])]
+  ;;                          :where [[b :xt/id id]
+  ;;                                  [b :balance/name balance-name]]}))
+
+  (biff/pprint result)
+
+  {:status 200
+   :body result})
+
 (defn list-balance [{:keys [biff/db path-params] :as req}]
+  (def result (biff/q db '{:find {:id id :name name}
+                           :where [[b :balance/name name]
+                                   [b :xt/id id]]}))
+
+  ;; (def result (biff/q db '{:find [(pull b [:xt/id :balance/name])]
+  ;;                          :where [[b :xt/id id]
+  ;;                                  [b :balance/name balance-name]]}))
+
+  (biff/pprint result)
+
+  {:status 200
+   :body result})
+
+(defn list-balance-with-values [{:keys [biff/db path-params] :as req}]
   (def result (biff/q db '{:find {:name name
                                   :movementsOut (distinct {:id movement-from-id :amount movement-from-amount})
                                   :amountOut movement-from-amount
@@ -59,6 +87,10 @@
                                    [movement-to :movement/to b]
                                    [movement-to :xt/id movement-to-id]
                                    [movement-to :movement/amount movement-to-amount]]}))
+
+  ;; (def result (biff/q db '{:find [(pull b [:xt/id :balance/name])]
+  ;;                          :where [[b :xt/id id]
+  ;;                                  [b :balance/name balance-name]]}))
 
   (biff/pprint result)
 
@@ -112,6 +144,9 @@
             ["/community/:id" {:get community}]]
    :api-routes ["" {:middleware [mid/wrap-signed-in]}
                 ["/balance"       {:post add-balance,
-                                   :get list-balance}]
+                                   :get list-balance-with-values
+                                   :delete delete-balance}]
+                ["/balance/:id"       {:delete delete-balance}]
+                ["/balance-simple"       {:get list-balance}]
                 ["/movement"       {:post add-movement,
                                     :get list-movements}]]})
