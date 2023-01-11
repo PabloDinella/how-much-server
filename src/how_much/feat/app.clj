@@ -75,74 +75,32 @@
    :body result})
 
 (defn list-balance-with-values [{:keys [biff/db path-params] :as req}]
-  ;; (def result (biff/q db '{:find {:id id
-  ;;                                 :name name
-  ;;                                 :amount amount
-  ;;                                 ;; :movementsOut (distinct {:id movement-from-id :amount movement-from-amount})
-  ;;                                 ;; :amountOut movement-from-amount
-  ;;                                 ;; :movementsIn (distinct {:id movement-to-id :amount movement-to-amount})
-  ;;                                 ;; :amountIn movement-to-amount
-  ;;                                 }
-  ;;                          :where [[b :balance/name name]
-  ;;                                  [b :xt/id id]
-  ;;                                  [(q {:find [{:amount amount
-  ;;                                               :from id
-  ;;                                               :to to}]
-  ;;                                       :where [[movement-from :movement/from id]
-  ;;                                               [movement-from :movement/to to]
-  ;;                                               [movement-from :movement/amount amount]
-  ;;                                               [(= id id)]]})
-  ;;                                   amount]
-  ;;                                 ;;  [movement-from :movement/from b]
-  ;;                                 ;;  [movement-from :xt/id movement-from-id]
-  ;;                                 ;;  [movement-from :movement/amount movement-from-amount]
-  ;;                                 ;;  [movement-to :movement/to b]
-  ;;                                 ;;  [movement-to :xt/id movement-to-id]
-  ;;                                 ;;  [movement-to :movement/amount movement-to-amount]
-  ;;                                  ]}))
+  (let [resultFrom (biff/q db '{:find {:id id
+                                       :name name
+                                       :outgoings (sum from-amount)}
+                                :where [[balance :balance/name name]
+                                        [balance :xt/id id]
+                                        [movement-from :xt/id from-id]
+                                        [movement-from :movement/from id]
+                                        [movement-from :movement/amount from-amount]]})
+        resultTo (biff/q db '{:find {:id id
+                                     :name name
+                                     :income (sum to-amount)}
+                              :where [[balance :balance/name name]
+                                      [balance :xt/id id]
+                                      [movement-to :xt/id to-id]
+                                      [movement-to :movement/to id]
+                                      [movement-to :movement/amount to-amount]]})
+        result (map
+                (fn
+                  [{id :id :as x}]
+                  (let [withFromAndToSums (assoc x :income (:income (first (filter #(= id (:id %)) resultTo))))
+                        withBalance (assoc withFromAndToSums :balance (- (:outgoings withFromAndToSums) (:income withFromAndToSums)))] withBalance))
+                resultFrom)]
 
-  (def resultFrom (biff/q db '{:find {:id id
-                                      :name name
-                                      :fromAmount (sum from-amount)}
-                               :where [[balance :balance/name name]
-                                       [balance :xt/id id]
-                                       [movement-from :xt/id from-id]
-                                       [movement-from :movement/from id]
-                                       [movement-from :movement/amount from-amount]]}))
-
-  (def resultTo (biff/q db '{:find {:id id
-                                    :name name
-                                    :toAmount (sum to-amount)}
-                             :where [[balance :balance/name name]
-                                     [balance :xt/id id]
-                                     [movement-to :xt/id to-id]
-                                     [movement-to :movement/to id]
-                                     [movement-to :movement/amount to-amount]]}))
-
-
-  ;; (biff/pprint resultFrom)
-
-;; {:id #uuid "14d1c445-3ebe-4b9d-b8ce-68edab9c8df9",
-;;                                     :name "Bradesco",
-;;                                     :fromAmount 10}
-;;                                    {:id #uuid "d45f2759-1ed0-4e2c-a1da-69106b6c5f44",
-;;                                     :name "Nuconta",
-;;                                     :fromAmount 20}
-
-  (def result (map
-               (fn
-                 [{id :id :as x}]
-                 (assoc x :toAmount (:toAmount (first (filter #(= id (:id %)) resultTo)))))
-               resultFrom))
-
-  ;; (def result (biff/q db '{:find [(pull b [:xt/id :balance/name])]
-  ;;                          :where [[b :xt/id id]
-  ;;                                  [b :balance/name balance-name]]}))
-
-  (biff/pprint result)
-
-  {:status 200
-   :body {:all result :onlyWithAmountFrom resultFrom :onlyWithAmountTo resultTo}})
+    (biff/pprint result)
+    {:status 200
+     :body result}))
 
 (defn list-movements [{:keys [biff/db path-params] :as req}]
   (def result (biff/q db '{:find {:id   id
