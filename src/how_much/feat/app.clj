@@ -5,7 +5,9 @@
             [rum.core :as rum]
             [xtdb.api :as xt]
             [ring.adapter.jetty9 :as jetty]
-            [cheshire.core :as cheshire]))
+            [cheshire.core :as cheshire]
+            [clojure.set :as set]
+            [ring.middleware.cors :refer [wrap-cors]]))
 
 (defn app [{:keys [session biff/db] :as req}]
   (let [{:user/keys [email]} (xt/entity db (:uid session))]
@@ -60,6 +62,16 @@
   {:status 200
    :body result})
 
+(defn distinct-by [f coll]
+  (let [groups (group-by f coll)]
+    (map #(first (groups %)) (distinct (map f coll)))))
+
+(biff/pprint (group-by :id [{:id 1 :name "a"}
+                            {:id 2 :name "b" :outraProp 2}
+                            {:id 2 :name "b" :outraOutraProp 2}]))
+
+(clojure.set/join [{:id 2, :name "b", :outraProp 2}] [{:id 2, :name "b", :outraOutraProp 2}] {:id :id})
+
 (defn list-balance [{:keys [biff/db path-params] :as req}]
   (def result (biff/q db '{:find {:id id :name name}
                            :where [[b :balance/name name]
@@ -83,6 +95,9 @@
                                         [movement-from :xt/id from-id]
                                         [movement-from :movement/from id]
                                         [movement-from :movement/amount from-amount]]})
+
+
+
         resultTo (biff/q db '{:find {:id id
                                      :name name
                                      :income (sum to-amount)}
@@ -91,14 +106,29 @@
                                       [movement-to :xt/id to-id]
                                       [movement-to :movement/to id]
                                       [movement-to :movement/amount to-amount]]})
+
+        resultsCombined (clojure.set/join resultFrom resultTo {:id :id})
+
         result (map
                 (fn
-                  [{id :id :as x}]
-                  (let [withFromAndToSums (assoc x :income (:income (first (filter #(= id (:id %)) resultTo))))
-                        withBalance (assoc withFromAndToSums :balance (- (:outgoings withFromAndToSums) (:income withFromAndToSums)))] withBalance))
-                resultFrom)]
+                  [{id :id :as item}]
 
-    (biff/pprint result)
+                  (biff/pprint resultsCombined)
+                  (let [;; withFromAndToSums (assoc x :income (:income (first (filter #(= id (:id %)) resultTo))))
+                        withBalance (assoc item :balance (- (or (:income item) 0) (or (:outgoings item) 0)))
+                        ;; withBalance 1
+                        ]
+                    ;; (biff/pprint resultFrom)
+                    ;; (biff/pprint resultTo)
+                    ;; (biff/pprint (or (:income withFromAndToSums) 0))
+                    withBalance))
+                resultsCombined)]
+
+
+    ;; (biff/pprint result)
+    ;; (biff/pprint "----")
+    ;; (biff/pprint (distinct-by :id (concat resultFrom resultTo)))
+    ;; (biff/pprint "----")
     {:status 200
      :body result}))
 
@@ -141,17 +171,28 @@
     {:status 303
      :headers {"Location" (str "/community/" movement-id)}}))
 
+(defn remove-movement [{{id :id} :path-params :as req}]
+  (biff/pprint id)
+  (biff/pprint (biff/submit-tx req
+                               [{:db/op :delete
+                                 :xt/id (parse-uuid id)}]))
+  {:status 200})
+
 (def features
   {:routes ["" {:middleware [mid/wrap-signed-in]}
             ["/app"           {:get app}]
             ;; ["/balance"       {:post add-balance}]
             ["/community"     {:post new-community}]
             ["/community/:id" {:get community}]]
-   :api-routes ["" {:middleware [mid/wrap-signed-in]}
+   :api-routes ["" {:middleware [;;mid/wrap-signed-in
+                                 [wrap-cors
+                                  :access-control-allow-origin #".*"
+                                  :access-control-allow-methods [:get :post]]]}
                 ["/balance"       {:post add-balance,
                                    :get list-balance-with-values
                                    :delete delete-balance}]
                 ["/balance/:id"       {:delete delete-balance}]
                 ["/balance-simple"       {:get list-balance}]
-                ["/movement"       {:post add-movement,
-                                    :get list-movements}]]})
+                ["/movement"       {:get list-movements,
+                                    :post add-movement}]
+                ["/movement/:id"       {:delete remove-movement}]]})
